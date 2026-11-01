@@ -17,3 +17,7 @@ export const testDeployment = (overrides: Partial<Deployment> = {}): Deployment 
   feishu: { cli: '/bin/false', botId: 'ou_bot', appId: 'cli_bot', brand: 'feishu', name: 'Widgets Bot' },
   ...overrides,
 })
+/** A deployment without GitHub: `github` unset, no repository watched; another Source (such as localboard) provides the requests. */
+export const testLocalDeployment = (overrides: Partial<Deployment> = {}): Deployment => ({
+  ...testMachine(), repository: '', github: undefined, ...overrides,
+})

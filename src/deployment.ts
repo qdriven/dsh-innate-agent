@@ -47,12 +47,24 @@ export const GithubAccountsSchema = z.object({
   cli: z.string().trim().default(''),
 })
 export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
-/** Source configuration keys that affect deployment setup and trigger a restart when changed. */
+/**
+ * Source configuration keys that affect deployment setup and trigger a restart when changed.
+ * An empty GitHub `repository` means the deployment uses no GitHub: setup then resolves no GitHub account, and a Source
+ * other than GitHub (such as the localboard Source) provides the requests. The GitHub Source must stay disabled in that
+ * deployment, exactly as Feishu must stay disabled without a bot.
+ */
 export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = { github: Object.keys(GithubAccountsSchema.shape), feishu: Object.keys(FeishuBotSchema.shape) }
 
 export interface Deployment extends Machine {
+  /** Empty in a deployment without GitHub: no repository is watched and no GitHub account is resolved. */
   repository: string
-  github: { cli: string; login: string; noreply: string }
+  /**
+   * The GitHub account, always set when the GitHub Source names a repository.
+   * Undefined in a deployment without GitHub: workers get no `gh` shim and git keeps no github.com credential helper.
+   * GitHub-side code (`src/sources/github*.ts`) may assume it is set: the GitHub Source polls nothing while setup
+   * resolves no repository, exactly as the Feishu Source does without a bot.
+   */
+  github: { cli: string; login: string; noreply: string } | undefined
   feishu?: FeishuBot
 }
 export interface FeishuBot { cli: string; appId: string; brand: 'feishu' | 'lark'; botId: string; name: string }
@@ -83,11 +95,17 @@ function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
   const result = schema.safeParse(value)
   return result.success ? result.data : undefined
 }
-/** Verify the agent's GitHub CLI identity and push access to the configured repository. */
+/**
+ * Verify the agent's GitHub CLI identity and push access to the configured repository.
+ * A GitHub configuration that names neither repository nor CLI resolves a deployment without GitHub: `repository` stays
+ * empty and no `github` account is set, so no `gh` shim is written and git keeps no github.com credential helper.
+ * Naming only one of the two remains a setup problem, as before.
+ */
 export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
   const { stateDir } = machine
   const accounts = GithubAccountsSchema.parse(github ?? {})
   const remote = accounts.repository
+  if (!remote && !accounts.cli) return { ...machine, repository: '', github: undefined }
   if (!remote) throw new SetupError('repositoryUnset')
   if (!accounts.cli) throw new SetupError('agentCliUnset')
   let cli: string
@@ -106,7 +124,7 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
 }
 
 const AuthStatus = z.object({ appId: z.string().regex(/^cli_[A-Za-z0-9]+$/), brand: z.enum(['feishu', 'lark']).default('feishu'), identities: z.object({ bot: z.object({ status: z.string() }) }) })
-const BotInfo = z.object({ bot: z.object({ open_id: z.string().regex(/^ou_[A-Za-z0-9]+$/), app_name: z.string().default('') }) })
+const BotInfo = z.object({ bot: z.object({ open_id: z.string().regex(/^ou_[a-zA-Z0-9]+$/), app_name: z.string().default('') }) })
 /**
  * Verify that the configured Feishu CLI is authenticated as a bot and restricted to strict mode `bot`.
  * Workers invoke this CLI as `lark-cli`, so a CLI that also permits a user identity would let workers act as that user.
