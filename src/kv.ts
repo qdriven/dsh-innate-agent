@@ -6,10 +6,9 @@ import type { PromptVersion } from './app/prompts.ts'
 import type { SettingsVersion } from './app/store.ts'
 import type { SettingsSave } from './policy.ts'
 import type { Retry } from './sources/github.ts'
-import type { DomainEvent } from './core/ports.ts'
 
-/** One traced domain event with its arrival sequence number; `data` is the event's own payload. */
-export type TraceEntry = { seq: number } & DomainEvent
+/** One traced event with its arrival sequence number; `data` is the event's own payload. */
+export type TraceEntry = { seq: number } & import('./app/trace.ts').TraceEvent
 
 /** Key of a KV record whose value has type `V`; a plain string represents an untyped key. */
 export type Key<V> = string & { readonly __value?: V }

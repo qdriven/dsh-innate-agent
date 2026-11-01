@@ -15,6 +15,14 @@ import type { Variable } from './execution-environment.ts'
 import { RetryHealth } from './retry-health.ts'
 import { initializeRoleModel } from './role-models.ts'
 import { bundledSkills } from './skill-files.ts'
+import type { Trace } from './trace.ts'
+
+/** The todo tool's session event, as `@deepseek-ai/dsh-tool-todo` declares it into `SessionEventMap`. */
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'todo/write': { todos: { content: string; status: 'pending' | 'in_progress' | 'completed' }[] }
+  }
+}
 import { SKILL_PREFIX, type PromptVersion, type Prompts } from './prompts.ts'
 import type { Store } from './store.ts'
 import { KV } from '../kv.ts'
@@ -31,6 +39,8 @@ export interface SessionsHost {
   readonly health: HealthEntry
   readonly masterId: string
   readonly lifetime: AbortSignal
+  /** Bounded event trace; a worker's todo snapshots and tool calls join it when set. Read lazily so both constructors order freely. */
+  readonly trace?: () => Pick<Trace, 'record'>
   closing(): boolean
   /** Execution environment variables for `ticket`, rendered into its worker's system prompt. */
   environment(ticket: Ticket): Variable[]
@@ -117,6 +127,18 @@ export class Sessions {
       if (!agent || !binding || binding.subagent) return
       this.retryHealth.observe(agent.id, event)
       this.updateModelHealth()
+      // Experiment observability: a worker's todo snapshots and tool calls join the bounded trace.
+      const ticketId = ticketOfSession(session.id)
+      const trace = this.host.trace?.()
+      if (!ticketId || !trace) return
+      if (event.type === 'todo/write') {
+        trace.record({ type: 'worker.todos', at: new Date().toISOString(),
+          data: { sessionId: session.id, ticketId, todos: event.data.todos } })
+      }
+      if (event.type === 'tool/call') {
+        trace.record({ type: 'worker.tool', at: new Date().toISOString(),
+          data: { sessionId: session.id, ticketId, name: event.data.name, turn: event.data.turn, step: event.data.step } })
+      }
     })
     ctx.on('agent/created', async ({ agent }) => { await this.decorate(agent); return undefined })
     // Opening a Session in DSH's Web UI before its first turn may select the default preset for it: select ours again. After

@@ -128,12 +128,15 @@ node cli/trace.mjs --state /path/to/orchestrator.sqlite
 
 ```
     7  14:32:01  ticket.created        ticket=9f2a1b3c4d5e
-    8  14:32:01  thread.subscribed     ticket=9f2a1b3c4d5e
     9  14:32:02  assignment.started    ticket=9f2a1b3c4d5e assignment=01JX…
    10  14:32:03  inputs.delivered      ticket=9f2a1b3c4d5e assignment=01JX…
-   12  14:35:47  worker.reported       ticket=9f2a1b3c4d5e state=ready PR ready: fixed the typo…
-   13  14:35:47  ticket.ended          ticket=9f2a1b3c4d5e
+   14  14:33:10  worker.todos          ticket=9f2a1b3c4d5e [0✓ 2▶ 3○] 定位错别字 | 改 README
+   15  14:33:12  worker.tool           ticket=9f2a1b3c4d5e grep (turn 1 step 2)
+   21  14:35:47  worker.reported       ticket=9f2a1b3c4d5e state=ready PR ready: fixed the typo…
+   22  14:35:47  ticket.ended          ticket=9f2a1b3c4d5e
 ```
+
+todo 也进了 trace：DSH 的 `todo_write` 工具每次写入都是一个 `todo/write` 会话事件（`[完成✓ 进行▶ 待办○]` + 当前 in_progress 项），加上 `worker.tool`（工具调用），可以看到 worker 内部每一步在干什么。这些在 DSH 面板里同样有 UI 呈现（todo 卡片来自 session 投影）。
 
 trace 保留最近 2000 条（`TRACE_LIMIT`），存于 `orchestrator.sqlite` 的 kv 表（`trace:events` / `trace:seq`），重启后序号继续。
 

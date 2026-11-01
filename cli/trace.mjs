@@ -35,6 +35,15 @@ const short = id => String(id ?? '').slice(0, 8)
 const render = entry => {
   const { seq, at, type, data } = entry
   const time = at.slice(11, 19)
+  if (type === 'worker.todos') {
+    const counts = { pending: 0, 'in_progress': 0, completed: 0 }
+    for (const todo of data.todos) counts[todo.status] = (counts[todo.status] ?? 0) + 1
+    const current = data.todos.filter(todo => todo.status === 'in_progress').map(todo => todo.content).join(' | ')
+    return `${String(seq).padStart(5)}  ${time}  ${type.padEnd(20)} ticket=${short(data.ticketId)} [${counts.completed}✓ ${counts['in_progress']}▶ ${counts.pending}○]${current ? ' ' + current.slice(0, 90) : ''}`
+  }
+  if (type === 'worker.tool') {
+    return `${String(seq).padStart(5)}  ${time}  ${type.padEnd(20)} ticket=${short(data.ticketId)} ${data.name} (turn ${data.turn} step ${data.step})`
+  }
   const parts = { ticket: 'ticketId' in data ? short(data.ticketId) : '', assignment: 'assignmentId' in data ? short(data.assignmentId) : '',
     trigger: 'triggerId' in data ? short(data.triggerId) : '', kind: 'kind' in data ? data.kind : '', state: 'state' in data ? data.state : '' }
   const extra = Object.entries(parts).filter(([, value]) => value).map(([key, value]) => `${key}=${value}`).join(' ')
