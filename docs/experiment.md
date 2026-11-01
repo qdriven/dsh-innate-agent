@@ -10,6 +10,8 @@
 | GitHub 可选化补丁 | `resolveDeployment` 在 GitHub Source 未配置仓库和 CLI 时返回无 GitHub 的 deployment；`writeEnvironment` 不写 `gh` shim 和 github.com 凭据；`Commands.gh/api` 在无 GitHub 时明确报错 |
 | `src/sources/localboard.ts` | 新 Source kind（按 docs/008-cookbook.md 配方），轮询本地看板 |
 | `cli/hookq.mjs` | 单文件本地看板 CLI（JSON 存储），即 cookbook 里的 `hookq` |
+| `scripts/dsh-superagent-local` | 无 tmux 服务管理：`nohup` 后台启动，`status/stop/restart` 复用上游脚本的 control 目录与退出码约定 |
+| `src/app/trace.ts` + `cli/trace.mjs` | 事件 trace：Engine 每个领域事件（含新增的 `inputs.delivered` / `inputs.read` / `worker.reported`）记入 KV 有界日志（2000 条），CLI 直接读 SQLite 查看 |
 | `KV.localboard` | 轮询游标 |
 | `tests/localboard.spec.ts` | 7 个用例：翻译/游标/Channel/Thread 上下文/插件入口/策略 |
 
@@ -19,7 +21,8 @@
 
 ### 0. 前置
 
-- Node 22.19+/24+、pnpm、git 2.32+、tmux（`brew install tmux`）、DSH `^0.2.1-alpha.2` + 模型 provider
+- Node 22.19+/24+、pnpm、git 2.32+、DSH `^0.2.1-alpha.2` + 模型 provider
+- **不需要 tmux**（本仓库用 `scripts/dsh-superagent-local` 的 nohup 模式；装了 tmux 用上游 `scripts/dsh-superagent` 也行）
 
 ### 1. 构建本地看板
 
@@ -61,10 +64,11 @@ dsh plugin --profile superagent add "link:$PWD"
   disabled: false
 ```
 
-### 3. 启动并配置
+### 3. 启动并配置（无 tmux）
 
 ```sh
-scripts/dsh-superagent start
+scripts/dsh-superagent-local start    # nohup 后台运行，日志在 .artifacts/dsh-local-*.log
+scripts/dsh-superagent-local status   # 0 正常 / 1 未运行 / 2 组件错 / 3 待配置
 ```
 
 面板（http://127.0.0.1:3082 → Superagent）里：
@@ -102,6 +106,37 @@ hookq comment --on m0001 --sender patrick --text "顺便把标题也改了"
 
 worker 的交付物是本地 git worktree 里的 commit（无 PR 绑定；那是 GitHub Source 的能力）。
 
+### 5. 看事件 trace
+
+Agent 每一步（Trigger 到达 → Eval → 接单 → 派工 → 输入送达/读取 → worker 各次 report → 结束）都记入有界 trace：
+
+```sh
+# 最近 50 条
+node cli/trace.mjs
+
+# 跟踪某个 ticket（含 ready/blocked/report 摘要）
+node cli/trace.mjs --ticket <ticketId> --limit 200
+
+# 实时跟随（每 2s 刷新）
+node cli/trace.mjs --follow
+
+# 指定数据库（默认 ~/.dsh/state/superagent/orchestrator.sqlite）
+node cli/trace.mjs --state /path/to/orchestrator.sqlite
+```
+
+输出示例：
+
+```
+    7  14:32:01  ticket.created        ticket=9f2a1b3c4d5e
+    8  14:32:01  thread.subscribed     ticket=9f2a1b3c4d5e
+    9  14:32:02  assignment.started    ticket=9f2a1b3c4d5e assignment=01JX…
+   10  14:32:03  inputs.delivered      ticket=9f2a1b3c4d5e assignment=01JX…
+   12  14:35:47  worker.reported       ticket=9f2a1b3c4d5e state=ready PR ready: fixed the typo…
+   13  14:35:47  ticket.ended          ticket=9f2a1b3c4d5e
+```
+
+trace 保留最近 2000 条（`TRACE_LIMIT`），存于 `orchestrator.sqlite` 的 kv 表（`trace:events` / `trace:seq`），重启后序号继续。
+
 ## 已知边界
 
 - **PR 生命周期**：localboard 无 PR 概念，Ticket 以 `ready` Report 结束（"completed"），不跟随分支关闭
@@ -117,3 +152,13 @@ worker 的交付物是本地 git worktree 里的 commit（无 PR 绑定；那是
 | `hookq comment --on <mID> --sender <user> [--mention] --text <t>` | 在某消息线程里回复 |
 | `hookq list [--conversation <id>]` | 查看所有消息 |
 | `pull/reply/thread` | Source 内部使用（游标/幂等回复/线程读取） |
+
+## 服务管理（scripts/dsh-superagent-local）
+
+| 命令 | 退出码 |
+| --- | --- |
+| `start` | nohup 启动（拒绝重复实例；复用上游 control 目录，`scripts/dsh-superagent status/stop` 也能管理它） |
+| `status` | 0 正常 / 1 未运行或重复 / 2 组件错 / 3 等待配置 |
+| `stop` / `restart` | SIGINT 优雅停止（默认等 300s），stop 记录 manual 标记 |
+
+服务不依赖任何终端窗口（nohup 脱离）；日志统一在 `.artifacts/dsh-local-<profile>-*.log`，保留最近 20 份。

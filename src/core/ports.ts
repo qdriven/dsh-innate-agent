@@ -1,6 +1,7 @@
 /** Ports the core depends on. Sources, policies, assessors, executors, and channels are project-specific. */
 import type { Assignment, ChannelRef, Decision, DecisionKind, Mandate, MandateBasis, Strength, Thread, Ticket, TicketEndBy, TicketOutcome, Trigger }
   from './model.ts'
+import type { WorkerReport } from './assignments.ts'
 import type { Reason } from './reasons.ts'
 
 /** Gate admission result: either inadmissible with a reason code, or admissible with strength and MandateBasis. */
@@ -92,6 +93,11 @@ export interface DomainEvents {
   'ticket.ended': { ticketId: string; by: TicketEndBy; outcome: TicketOutcome; reason?: string }
   'assignment.started': { ticketId: string; assignmentId: string }
   'assignment.ended': { ticketId: string; assignmentId: string; reason: string }
+  /** A worker's Session received the inputs of the assignment that runs its ticket, and read them into a step. */
+  'inputs.delivered': { ticketId: string; assignmentId: string; inputIds: string[] }
+  'inputs.read': { ticketId: string; inputIds: string[] }
+  /** A worker reported its ticket's state (`progress`, `waiting`, `ready`, `blocked`, `failed` or `dropped`). */
+  'worker.reported': { ticketId: string; assignmentId: string; state: WorkerReport['state']; summary: string }
   'thread.subscribed': { threadKey: string; ticketId: string }
   /** A person dropped every ticket's Subscription, or a ticket's Executor its own, for `reason`. */
   'thread.unsubscribed': { threadKey: string; ticketId: string; by: 'person' | 'executor'; reason?: string }

@@ -55,6 +55,7 @@ export class Assignments extends EnginePart {
     }
     delete ticket.delivery
     this.repo.tickets.save(ticket)
+    this.emit('inputs.delivered', { ticketId, assignmentId, inputIds })
   }
   /** Records when the worker's Session of an open ticket took `inputIds` into a step, from which its model reads them. */
   read(ticketId: string, inputIds: string[]): void {
@@ -62,6 +63,7 @@ export class Assignments extends EnginePart {
     if (!liveTicket(ticket)) return
     for (const input of ticket.inputs) if (input.kind === 'trigger' && inputIds.includes(input.id)) input.readAt ||= this.now()
     this.repo.tickets.save(ticket)
+    this.emit('inputs.read', { ticketId, inputIds })
   }
   turnEnded(ticketId: string, assignmentId: string): void {
     const ticket = this.running(ticketId, assignmentId)
@@ -125,6 +127,7 @@ export class Assignments extends EnginePart {
     if (report.answers) this.takeUp(ticketId, report.answers)
     if (report.state === 'blocked' || report.state === 'failed') ticket.undelivered = ticket.undelivered.filter(id => !automatic(ticket.inputs.find(input => input.id === id)))
     this.repo.tickets.save(ticket)
+    this.emit('worker.reported', { ticketId, assignmentId: assignment.id, state: report.state, summary: report.summary.slice(0, 200) })
     // A ticket that follows Threads ends with them: a ready report ends it only once followsDone holds, with that outcome.
     const ready = !ticket.follows?.length ? 'completed' : this.tickets.followsDone(ticket)?.outcome
     // A dropped report after a close the ticket deferred ends it as the close did, which its final notice tells.

@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Manage the dsh-innate-agent service without tmux: a detached `nohup` process instead.
+
+`status`, `stop` and the control files follow `scripts/dsh-superagent` (this script reuses its
+control directory and PID convention, and the same HTTP health check), so the upstream script's
+`status`/`stop` also work on a service started here. `start` refuses duplicates and reuses the
+recorded PID while the process lives.
+
+Usage: scripts/dsh-superagent-local {start|stop|restart|status} [--profile NAME] [--url URL]
+"""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import urllib.request
+
+ROOT = Path(__file__).resolve().parent.parent
+CONTROL = ROOT / '.artifacts' / 'control'
+KEEP_LOGS = 20
+
+
+def control(profile):
+    directory = CONTROL / 'profiles' / profile
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def stopped(profile):
+    return (control(profile) / 'manually-stopped').exists()
+
+
+def state(url):
+    request = urllib.request.Request(url.rstrip('/') + '/orchestrator/api/state',
+                                     headers={'x-orchestrator-request': '1'})
+    try:
+        with urllib.request.urlopen(request, timeout=2) as response:
+            value = json.load(response)
+        health, setup = value.get('health') or {}, value.get('setup') or {}
+        entries = {name: entry if isinstance(entry, dict) else {} for name, entry in health.items()}
+        return {'health': {name: entry.get('state') for name, entry in entries.items()},
+                'errors': {name: str(entry.get('detail', '')) for name, entry in entries.items() if entry.get('state') == 'error'},
+                'setup': setup.get('problem'), 'feishu': setup.get('feishuProblem')}
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def ps(*options):
+    result = subprocess.run(['ps', '-ww', *options, '-o', 'pid=,args='], check=False, capture_output=True, text=True)
+    for line in result.stdout.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            yield int(parts[0]), parts[1].split()
+
+
+def serves(args, profile):
+    words, matched, value = [], False, False
+    for word in args[1:]:
+        if value:
+            matched, value = matched or word == profile, False
+        elif word == '--profile':
+            value = True
+        elif word == '--profile=' + profile:
+            matched = True
+        elif not word.startswith('-'):
+            words.append(word)
+    return matched and 'plugin' not in words
+
+
+def processes(profile):
+    return [pid for pid, args in ps('-ax') if serves(args, profile)]
+
+
+def running(pid):
+    return any(found == pid for found, _ in ps('-p', str(pid)))
+
+
+def recorded(profile):
+    try:
+        return int((control(profile) / 'service.pid').read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def runtime_up(current):
+    return current is not None and current['health'].get('runtime') in ('ready', 'paused')
+
+
+def status(args):
+    pids = processes(args.profile)
+    pid = recorded(args.profile)
+    if pid and pid not in pids and running(pid):
+        pids.append(pid)
+    current = state(args.url) if pids else None
+    print(json.dumps({'pids': pids, 'url': args.url, 'manually_stopped': stopped(args.profile),
+                      'health': current and current['health'], 'errors': current and current['errors'],
+                      'setup': current and current['setup']}, ensure_ascii=False, indent=2))
+    if len(pids) != 1 or not runtime_up(current):
+        return 1
+    if current['setup']:
+        return 3
+    return 2 if {name: detail for name, detail in current['errors'].items() if name != 'runtime'} else 0
+
+
+def stop(args, intentional=True):
+    pids = processes(args.profile)
+    if len(pids) > 1:
+        raise RuntimeError('Multiple dsh processes found; refusing to choose one.')
+    if intentional:
+        (control(args.profile) / 'manually-stopped').write_text(time.strftime('%Y-%m-%dT%H:%M:%S%z') + '\n')
+    for pid in pids:
+        os.kill(pid, signal.SIGINT)
+    deadline = time.monotonic() + args.stop_timeout
+    while any(running(pid) for pid in pids):
+        if time.monotonic() >= deadline:
+            raise RuntimeError('Graceful stop timed out; no forced kill was sent. Check status.')
+        time.sleep(0.5)
+    (control(args.profile) / 'service.pid').unlink(missing_ok=True)
+    print('dsh-innate-agent stopped.' if intentional else 'dsh-innate-agent stopped (not marked manual).')
+
+
+def start(args):
+    pids = processes(args.profile)
+    if len(pids) > 1:
+        raise RuntimeError('Multiple dsh processes found; refusing to start another.')
+    if not pids:
+        dsh = shutil.which('dsh')
+        if not dsh:
+            raise RuntimeError('dsh must be on PATH.')
+        if state(args.url) is not None:
+            raise RuntimeError('An existing orchestrator answers at this URL; refusing duplicate startup.')
+        stamp = time.strftime('%Y%m%d-%H%M%S')
+        log = ROOT / '.artifacts' / f'dsh-local-{args.profile}-{stamp}-{os.getpid()}.log'
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.touch()
+        for old in sorted((ROOT / '.artifacts').glob(f'dsh-local-{args.profile}-*.log'), key=lambda p: p.stat().st_mtime)[:-KEEP_LOGS]:
+            old.unlink(missing_ok=True)
+        # nohup + & keeps the service alive without tmux or any terminal window; umask 077 matches the upstream script.
+        command = ('umask 077; nohup ' + dsh + ' --profile ' + args.profile + ' --no-open'
+                   + ' >> ' + repr(str(log)) + ' 2>&1 & echo $!')
+        pid = subprocess.run(['sh', '-c', command], cwd=str(ROOT), check=True, capture_output=True, text=True).stdout.strip()
+        if pid.isdigit():
+            (control(args.profile) / 'service.pid').write_text(pid + '\n')
+        print('Log: ' + str(log), flush=True)
+    else:
+        (control(args.profile) / 'service.pid').write_text(f'{pids[0]}\n')
+        print(f'dsh-innate-agent already running (PID {pids[0]}); no duplicate started.', flush=True)
+    (control(args.profile) / 'manually-stopped').unlink(missing_ok=True)
+    deadline = time.monotonic() + args.timeout
+    while time.monotonic() < deadline:
+        current = state(args.url)
+        if processes(args.profile) and runtime_up(current):
+            code = status(args)
+            if current['setup']:
+                print('Waiting for setup: ' + str(current['setup'].get('detail', '')))
+            return code
+        time.sleep(1)
+    status(args)
+    raise RuntimeError('Startup health check timed out; inspect the log. Any running process was left intact.')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action', choices=['start', 'stop', 'restart', 'status'])
+    parser.add_argument('--profile', default=os.environ.get('DSH_SUPERAGENT_PROFILE') or 'superagent')
+    parser.add_argument('--url', default=os.environ.get('DSH_SUPERAGENT_URL') or 'http://127.0.0.1:3082')
+    parser.add_argument('--timeout', type=float, default=60)
+    parser.add_argument('--stop-timeout', type=float, default=300)
+    args = parser.parse_args()
+    if args.action == 'status':
+        return status(args)
+    if args.action in ('stop', 'restart'):
+        stop(args, intentional=args.action == 'stop')
+    if args.action in ('start', 'restart'):
+        return start(args)
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)

@@ -6,6 +6,10 @@ import type { PromptVersion } from './app/prompts.ts'
 import type { SettingsVersion } from './app/store.ts'
 import type { SettingsSave } from './policy.ts'
 import type { Retry } from './sources/github.ts'
+import type { DomainEvent } from './core/ports.ts'
+
+/** One traced domain event with its arrival sequence number; `data` is the event's own payload. */
+export type TraceEntry = { seq: number } & DomainEvent
 
 /** Key of a KV record whose value has type `V`; a plain string represents an untyped key. */
 export type Key<V> = string & { readonly __value?: V }
@@ -57,4 +61,10 @@ export const KV = {
     seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },
   /** Localboard Source: the pull cursor of the local issue-board queue (`cli/hookq.mjs`). */
   localboard: { cursor: record<number>('localboard-cursor') },
+  /**
+   * Trace: every domain event the Engine emits, as a bounded append-only log in KV. Key `trace:events` holds the newest
+   * `TRACE_LIMIT` entries (see `src/app/trace.ts`); `trace:seq` numbers them in arrival order. Experiment observability:
+   * `cli/trace.mjs` reads the same records from the SQLite database.
+   */
+  trace: { events: record<TraceEntry[]>('trace:events'), seq: record<number>('trace:seq') },
 }

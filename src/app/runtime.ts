@@ -42,6 +42,7 @@ import { feishuSettings } from '../sources/feishu.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
 import { Settings } from './settings.ts'
+import { Trace } from './trace.ts'
 import { sourceContextOf, type SourceContextDeps } from './source-context.ts'
 import type { ResourceHost } from './resources.ts'
 import { mainTools, type MainToolsHost } from './tools/main.ts'
@@ -69,6 +70,8 @@ export class Runtime extends Service implements SourceHost {
   readonly assessor: MasterAssessor
   readonly outbox: Outbox
   readonly engine: Engine
+  /** Bounded trace of every domain event, for experiment observability. */
+  readonly trace: Trace
   readonly passes: Passes
   readonly ready: Promise<void>
   private readonly board = new HealthBoard()
@@ -133,9 +136,12 @@ export class Runtime extends Service implements SourceHost {
         deliver: (id, text) => sessions.prompt(masterId, id, text, 'steer'), candidateCard: candidate => candidateCard(links, candidate) })
       const outbox = this.outbox = new Outbox({ store, effects, sources, commands, paused: () => this.paused() })
       const { assessor, executor } = this
+      const trace = this.trace = new Trace(store)
       const policy = () => settingsPolicy(store.settings(), sources)
       const engine = this.engine = new Engine({ repo: store, scope: sources, policy, assessor, executor,
         outbox, prepareTicket: (ticket, outcome) => executor.prepare(ticket, outcome), emit: event => {
+          // Record every domain event in the bounded trace, for experiment observability (`cli/trace.mjs`).
+          trace.record(event)
           // Notify the main Session only about domain events it did not initiate itself.
           const notice = this.quiet ? undefined : eventNotice(event, id => store.tickets.get(id))
           if (notice) sessions.notify(...notice)

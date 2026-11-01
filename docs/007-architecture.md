@@ -324,6 +324,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/effects.ts` | Effects |
 | `src/app/versions.ts` | `Versions`: a record kept as numbered snapshots with a pointer to the current one, for the settings and the prompts |
 | `src/app/cache.ts` | `TextCache`: texts kept in memory within a size, the least recently used dropped first |
+| `src/app/trace.ts` | `Trace`: every domain event appended to a bounded KV log with its arrival sequence number, for experiment observability |
 | `src/app/settings.ts` | Settings |
 | `src/app/settings-history.ts` | `policyHistory`: each saved settings revision with what it changed from the one before |
 | `src/app/prompts.ts` | Prompts, `builtInParts`, the built-in parts a team may override, and `promptParts`, the order of a role's prompt sections |
@@ -420,6 +421,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/passes.spec.ts` | Passes: one at a time, the ones asked for during a pass run as one after it, and the runtime health a failed pass reports |
 | `tests/outbox.spec.ts` | The Outbox on a running Runtime: messages wait while processing is paused or their Source is not installed |
 | `tests/cache.spec.ts` | `TextCache` |
+| `tests/trace.spec.ts` | The bounded domain-event trace: sequence numbers, the retention limit, ticket filtering |
 | `tests/queue.spec.ts` | The Runtime's work through the effect queue, and what earlier versions stored |
 | `tests/followups.spec.ts` | A person's follow-up on a Ticket's Thread: its notice to the main Session, the tools that act on it, what a burst costs; a worker's hand-back and context follow, and the main Session's note |
 | `tests/health.spec.ts` | One health entry per part, each cleared by its own next success |
