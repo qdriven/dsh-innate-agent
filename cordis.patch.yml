@@ -12,7 +12,7 @@
       disabled: true
     # Localboard Source: a local issue-board through the hookq CLI, for experiments without GitHub.
     - id: dsh-innate-localboard
-      name: dsh-innate-agent/localboard-watch
+      name: dsh-superagent/localboard-watch
       disabled: true
     # The agent preset of every Executor Session (WORKER_PRESET in src/app/sessions.ts); the main Session has its own, below.
     # It is DSH's `standard` preset with only what a worker needs, and a shell whose foreground command moves to a background job

@@ -78,16 +78,19 @@ describe('localboard source', () => {
     h.store.close()
   })
 
-  it('answers sent, gone only for a 410, and rethrows other failures', async () => {
+  it('answers sent, gone only for a 410, and rethrows other failures, using the configured CLI path', async () => {
     const h = host()
     const reply: OutboundMessage = { id: 'r1', channel: { source: SOURCE, thread: `${SOURCE}:ops:m1`,
       address: { conversation: 'ops', message: 'm1' } }, text: 'done', kind: 'reply' }
-    queue(h, () => ({}))
-    expect(await sendLocalboard(h.ctx, reply)).toBe('sent')
+    const runs: string[] = []
+    vi.spyOn(h.commands, 'run').mockImplementation(async program => { runs.push(program); return '{}' })
+    const sender = { commands: h.commands, config: { cli: '/opt/hookq', conversations: [], pollSeconds: 30 } as never }
+    expect(await sendLocalboard(sender, reply)).toBe('sent')
+    expect(runs).toEqual(['/opt/hookq'])
     vi.spyOn(h.commands, 'run').mockRejectedValue(commandError({ stderr: JSON.stringify({ error: { code: 410, message: 'gone' } }), code: 1 }))
-    expect(await sendLocalboard(h.ctx, reply)).toBe('gone')
+    expect(await sendLocalboard(sender, reply)).toBe('gone')
     vi.spyOn(h.commands, 'run').mockRejectedValue(commandError({ stderr: 'hookq could not run: ENOENT', code: 1 }))
-    await expect(sendLocalboard(h.ctx, reply)).rejects.toBeInstanceOf(CliError)
+    await expect(sendLocalboard(sender, reply)).rejects.toBeInstanceOf(CliError)
     h.store.close()
   })
 

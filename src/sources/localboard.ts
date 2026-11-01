@@ -56,11 +56,13 @@ export function localboardTrigger(message: QueueMessage, me: string): Trigger | 
 }
 
 /** Replies under a message once per idempotency key; a deleted conversation answers 410, which is `gone`. */
-export async function sendLocalboard(host: Pick<SourceContext, 'commands'>, message: OutboundMessage): Promise<'sent' | 'gone'> {
+export async function sendLocalboard(host: { commands: SourceContext['commands']; config?: LocalboardConfig }, message: OutboundMessage): Promise<'sent' | 'gone'> {
   const { conversation, message: to } = message.channel.address
   if (!conversation || !to) throw new Error('Missing localboard reply target')
+  // The host process may not find the CLI by name on its PATH; run the configured path when there is one.
+  const cli = host.config?.cli || 'hookq'
   try {
-    await host.commands.run('hookq', ['reply', '--conversation', conversation, '--to', to, '--key', message.id, '--text', message.text])
+    await host.commands.run(cli, ['reply', '--conversation', conversation, '--to', to, '--key', message.id, '--text', message.text])
     return 'sent'
   } catch (error) {
     if (error instanceof CliError && error.code === 410) return 'gone'
@@ -69,9 +71,9 @@ export async function sendLocalboard(host: Pick<SourceContext, 'commands'>, mess
 }
 
 /** Reads the queue after the cursor, takes in each message, then moves the cursor past them. */
-export async function pollQueue(ctx: SourceContext, signal: AbortSignal): Promise<{ read: number; unreadable: number }> {
+export async function pollQueue(ctx: SourceContext, signal: AbortSignal, cli = 'hookq'): Promise<{ read: number; unreadable: number }> {
   const after = ctx.state.get(KV.localboard.cursor) ?? 0
-  const output = await ctx.commands.withSignal(signal).run('hookq', ['pull', '--after', String(after), '--json'])
+  const output = await ctx.commands.withSignal(signal).run(cli, ['pull', '--after', String(after), '--json'])
   const page = PageSchema.parse(JSON.parse(output))
   let unreadable = 0
   for (const item of page.items) {
@@ -98,8 +100,9 @@ async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
     if (!config) ctx.report(SOURCE, health('paused', 'sourceOff'))
     else {
       const at = new Date().toISOString()
+      const cli = config.cli || 'hookq'
       try {
-        const { read, unreadable } = await pollQueue(ctx, signal)
+        const { read, unreadable } = await pollQueue(ctx, signal, cli)
         failures = 0
         ctx.report(SOURCE, { state: 'ready', detail: `${read} messages, ${unreadable} unreadable`, at })
       } catch (error) {
