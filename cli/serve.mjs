@@ -171,7 +171,7 @@ async function loadHealth() {
   try {
     const r = await fetch('/api/health'); const d = await r.json()
     if (!d.reachable) { badge.textContent = '服务未运行'; badge.className = 'badge bad'
-      $('health').textContent = '连不上 orchestrator（127.0.0.1:3082）。\\n先启动：\\n  cd …/dsh-innate-agent && export \$(grep -v \'^#\' ~/.dsh/.env | xargs) && ./scripts/dsh-superagent-local start'; return }
+      $('health').textContent = "连不上 orchestrator（127.0.0.1:3082）。\\n先启动：\\n  cd …/dsh-innate-agent && export $(grep -v '^#' ~/.dsh/.env | xargs) && ./scripts/dsh-superagent-local start"; return }
     const entries = Object.entries(d.health ?? {})
     const bad = entries.filter(([,v]) => v.state === 'error')
     badge.textContent = bad.length ? \`\${bad.length} 个组件异常\` : '全部正常'
